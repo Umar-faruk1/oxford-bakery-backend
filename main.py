@@ -10,12 +10,10 @@ app = FastAPI()
 # Configure CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Allow all origins in development
+    allow_origins=["http://localhost:5173"],  # Your frontend URL
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],
-    allow_headers=["*"],
-    expose_headers=["*"],
-    max_age=3600,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "Accept"],
 )
 
 # Mount the uploads directory to serve static files
@@ -25,10 +23,15 @@ app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 Base.metadata.create_all(bind=engine)
 
 # Include routers
-app.include_router(auth_routes.router)
-app.include_router(user_routes.router)
-app.include_router(admin_routes.router)
-app.include_router(menu_routes.router)
-app.include_router(promo_routes.router)
+app.include_router(auth_routes.router, prefix="/api")
+app.include_router(user_routes.router, prefix="/api")
+app.include_router(admin_routes.router, prefix="/api")
+app.include_router(menu_routes.router, prefix="/api")
+app.include_router(promo_routes.router, prefix="/api")
+
+# Optional: Add a test route
+@app.get("/")
+def read_root():
+    return {"message": "Welcome to Oxford Bakery API"}
 
 
