@@ -1,6 +1,12 @@
 from pydantic import BaseModel, EmailStr
 from typing import Optional, List
 from datetime import datetime
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+BACKEND_URL = os.getenv('BACKEND_URL', 'http://localhost:8000')
 
 class UserSignup(BaseModel):
     fullname: str
@@ -58,7 +64,7 @@ class UserResponse(BaseModel):
             role=user.role,
             status=user.status,
             orders=user.orders,
-            image=f"http://localhost:8000{user.image}" if user.image else None,
+            image=f"{BACKEND_URL}{user.image}" if user.image else None,
             joinDate=user.created_at.strftime("%Y-%m-%d") if user.created_at else datetime.now().strftime("%Y-%m-%d")
         )
 
@@ -88,7 +94,7 @@ class CategoryResponse(CategoryBase):
             id=category.id,
             name=category.name,
             description=category.description,
-            image=f"http://localhost:8000{category.image}" if category.image else None,
+            image=f"{BACKEND_URL}{category.image}" if category.image else None,
             item_count=len(category.menu_items) if with_count else 0,
             created_at=category.created_at,
             updated_at=category.updated_at
@@ -130,7 +136,7 @@ class MenuItemResponse(MenuItemBase):
             price=menu_item.price,
             category_id=menu_item.category_id,
             status=menu_item.status,
-            image=f"http://localhost:8000{menu_item.image}" if menu_item.image else None,
+            image=f"{BACKEND_URL}{menu_item.image}" if menu_item.image else None,
             category=CategoryResponse.from_db_model(menu_item.category, with_count=False),
             created_at=menu_item.created_at,
             updated_at=menu_item.updated_at
