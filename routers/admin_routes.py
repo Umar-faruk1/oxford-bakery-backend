@@ -1,10 +1,14 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from database import get_db
 from models import User
-from schemas import UserUpdate, UserResponse
+from schemas import UserUpdate, UserResponse, ProfileUpdate, PasswordUpdate
 from typing import List
 from .auth_routes import get_current_user
+from .auth import verify_password, hash_password
+import os
+from pathlib import Path
+import shutil
 
 router = APIRouter(
     prefix="/admin",
@@ -145,4 +149,63 @@ async def delete_user(
     db.delete(user)
     db.commit()
     
-    return {"message": "User deleted successfully"} 
+    return {"message": "User deleted successfully"}
+
+# Profile routes
+@router.get("/profile", response_model=UserResponse)
+async def get_admin_profile(current_user: User = Depends(get_admin_user)):
+    return UserResponse.from_db_model(current_user)
+
+@router.put("/profile", response_model=UserResponse)
+async def update_admin_profile(
+    profile_data: ProfileUpdate,
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    current_user.fullname = profile_data.fullname
+    db.commit()
+    db.refresh(current_user)
+    
+    return UserResponse.from_db_model(current_user)
+
+@router.post("/profile/avatar")
+async def update_admin_avatar(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    # Create uploads directory if it doesn't exist
+    upload_dir = Path("uploads/avatars")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Generate file path
+    file_extension = os.path.splitext(file.filename)[1]
+    file_name = f"avatar_{current_user.id}{file_extension}"
+    file_path = upload_dir / file_name
+    
+    # Save the file
+    with file_path.open("wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+    
+    # Update user's image path in database
+    current_user.image = f"/uploads/avatars/{file_name}"
+    db.commit()
+    
+    return {"image_url": current_user.image}
+
+@router.put("/profile/password")
+async def change_admin_password(
+    password_data: PasswordUpdate,
+    current_user: User = Depends(get_admin_user),
+    db: Session = Depends(get_db)
+):
+    if not verify_password(password_data.current_password, current_user.password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Current password is incorrect"
+        )
+    
+    current_user.password = hash_password(password_data.new_password)
+    db.commit()
+    
+    return {"message": "Password updated successfully"} 
