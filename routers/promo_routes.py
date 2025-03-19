@@ -5,7 +5,11 @@ from database import get_db
 from models import PromoCode, User
 from schemas import PromoCodeCreate, PromoCodeUpdate, PromoCodeResponse
 from .auth_routes import get_current_user
-from datetime import datetime
+from datetime import datetime, timezone
+from pydantic import BaseModel
+
+class PromoValidateRequest(BaseModel):
+    code: str
 
 router = APIRouter(
     prefix="/promo",
@@ -198,5 +202,41 @@ async def toggle_promo_status(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e)
+        )
+
+@router.post("/validate")
+async def validate_promo_code(
+    promo_data: PromoValidateRequest,
+    db: Session = Depends(get_db)
+):
+    """Validate a promo code"""
+    try:
+        now = datetime.now(timezone.utc)
+        promo = db.query(PromoCode).filter(
+            PromoCode.code == promo_data.code,
+            PromoCode.is_active == True,
+            PromoCode.start_date <= now,
+            PromoCode.end_date >= now
+        ).first()
+
+        if not promo:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Invalid or expired promo code"
+            )
+
+        return {
+            "valid": True,
+            "code": promo.code,
+            "discount": promo.discount,
+            "usage_count": promo.usage_count
+        }
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=str(e)
         ) 

@@ -24,15 +24,42 @@ async def get_admin_user(current_user: User = Depends(get_current_user)):
         )
     return current_user
 
-@router.get("/users", response_model=List[UserResponse])
-async def get_all_users(
-    skip: int = 0,
-    limit: int = 10,
-    current_user: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
+@router.get("/users")
+async def get_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
-    users = db.query(User).offset(skip).limit(limit).all()
-    return [UserResponse.from_db_model(user) for user in users]
+    try:
+        if current_user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not authorized to access this resource"
+            )
+        
+        users = db.query(User).all()
+        # Format user data
+        formatted_users = [{
+            "id": user.id,
+            "fullname": user.fullname,
+            "email": user.email,
+            "role": user.role,
+            "status": user.status,
+            "image": user.image,
+            "created_at": user.created_at,
+            "updated_at": user.updated_at,
+            # Format for the Orders component
+            "customer": {
+                "name": user.fullname,
+                "initials": "".join(name[0].upper() for name in user.fullname.split() if name)
+            }
+        } for user in users]
+        
+        return formatted_users
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
 
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user(
