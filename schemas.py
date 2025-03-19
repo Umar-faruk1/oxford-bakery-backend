@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 import os
 from dotenv import load_dotenv
@@ -158,27 +158,90 @@ class PromoCodeUpdate(BaseModel):
     end_date: Optional[datetime] = None
     is_active: Optional[bool] = None
 
-class PromoCodeResponse(PromoCodeBase):
+class PromoCodeResponse(BaseModel):
     id: int
-    usage_count: int
+    code: str
+    discount: str
+    start_date: datetime
+    end_date: datetime
     is_active: bool
-    created_at: datetime
+    usage_count: int = 0
+    created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    
+    class Config:
+        from_attributes = True
+        json_encoders = {
+            datetime: lambda v: v.isoformat() if v else None
+        }
+
+    @classmethod
+    def from_db_model(cls, promo):
+        if not promo:
+            return None
+        return cls(
+            id=promo.id,
+            code=promo.code,
+            discount=str(promo.discount),  # Convert to string if it's not already
+            start_date=promo.start_date,
+            end_date=promo.end_date,
+            is_active=promo.is_active,
+            usage_count=promo.usage_count,
+            created_at=promo.created_at,
+            updated_at=promo.updated_at
+        )
+
+class OrderItemCreate(BaseModel):
+    menu_item_id: int
+    quantity: int
+    price: float
+
+class OrderCreate(BaseModel):
+    reference: str
+    amount: float
+    email: str
+    name: str
+    phone: str
+    address: str
+    promo_code: Optional[str] = None
+    items: List[OrderItemCreate]
+
+class PaymentVerification(BaseModel):
+    reference: str
+    status: str
+    transaction_id: str
+
+class OrderResponse(BaseModel):
+    id: int
+    reference: str
+    amount: float
+    delivery_fee: float
+    discount: float
+    final_amount: float
+    promo_code: Optional[str]
+    email: str
+    name: str
+    phone: str
+    address: str
+    status: str
+    payment_status: str
+    created_at: datetime
+    items: List[OrderItemCreate]
 
     class Config:
         from_attributes = True
 
-    @classmethod
-    def from_db_model(cls, promo):
-        return cls(
-            id=promo.id,
-            code=promo.code,
-            discount=promo.discount,
-            start_date=promo.start_date,
-            end_date=promo.end_date,
-            usage_count=promo.usage_count,
-            is_active=promo.is_active,
-            created_at=promo.created_at,
-            updated_at=promo.updated_at
-        )
+class NotificationResponse(BaseModel):
+    id: int
+    title: str
+    message: str
+    type: str
+    read: bool
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+class OrderStatusUpdate(BaseModel):
+    status: Literal['pending', 'processing', 'delivered', 'cancelled']
 
