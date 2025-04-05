@@ -1,110 +1,116 @@
-from database import Base
-from sqlalchemy import Column, Integer, String, DateTime, Boolean, Float, ForeignKey
-from sqlalchemy.orm import relationship, backref
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, Boolean, JSON, Table, Text
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from database import Base
 from datetime import datetime
+import json
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    fullname = Column(String(255), nullable=False)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    password = Column(String(255), nullable=True) 
-    image = Column(String(1000), nullable=True)
-    role = Column(String(50), default="users")  # Add role field with default value
-    status = Column(String(50), default="active")  # 'active' or 'inactive'
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    fullname = Column(String)
+    email = Column(String, unique=True, index=True)
+    password = Column(String)
+    role = Column(String, default="user")
+    status = Column(String, default="active")
+    image = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    # Relationships
+    notifications = relationship("Notification", back_populates="user")
+    orders = relationship("Order", back_populates="user")
 
 class Category(Base):
     __tablename__ = "categories"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    description = Column(String(500))
-    image = Column(String(1000), nullable=True)
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    name = Column(String)
+    description = Column(String, nullable=True)
+    image = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationship with menu items
+
+    # Relationships
     menu_items = relationship("MenuItem", back_populates="category")
 
 class MenuItem(Base):
     __tablename__ = "menu_items"
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(255), nullable=False)
-    description = Column(String(500))
-    price = Column(Float, nullable=False)
-    image = Column(String(1000), nullable=True)
+    name = Column(String)
+    description = Column(String, nullable=True)
+    price = Column(Float)
+    image = Column(String, nullable=True)
     category_id = Column(Integer, ForeignKey("categories.id"))
-    status = Column(String(50), default="active")  # 'active' or 'inactive'
-    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    status = Column(String, default="active")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-    
-    # Relationship with category
+
+    # Relationships
     category = relationship("Category", back_populates="menu_items")
 
 class PromoCode(Base):
     __tablename__ = "promo_codes"
 
     id = Column(Integer, primary_key=True, index=True)
-    code = Column(String(50), unique=True, index=True)
-    discount = Column(String(50))  # Can be percentage (e.g., "20%") or fixed amount
-    start_date = Column(DateTime(timezone=True), nullable=False)
-    end_date = Column(DateTime(timezone=True), nullable=False)
-    usage_count = Column(Integer, default=0)
+    code = Column(String, unique=True)
+    discount = Column(String)  # Store as string to handle both percentage and fixed amounts
+    start_date = Column(DateTime(timezone=True))
+    end_date = Column(DateTime(timezone=True))
     is_active = Column(Boolean, default=True)
+    usage_count = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
-
-class Order(Base):
-    __tablename__ = "orders"
-
-    id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # Make nullable
-    reference = Column(String(255))
-    email = Column(String(255))
-    name = Column(String(255))
-    phone = Column(String(50))
-    address = Column(String(500))
-    amount = Column(Float)
-    delivery_fee = Column(Float, default=20.00)
-    final_amount = Column(Float)  # Add this field
-    promo_code = Column(String(50), nullable=True)
-    status = Column(String(50), default="pending")
-    payment_status = Column(String(50), default="pending")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, nullable=True)
-
-    # Relationships
-    user = relationship(
-        "User",
-        backref=backref("orders", cascade="all, delete-orphan"),
-        single_parent=True
-    )
-    items = relationship("OrderItem", back_populates="order")
-
-class OrderItem(Base):
-    __tablename__ = "order_items"
-
-    id = Column(Integer, primary_key=True, index=True)
-    order_id = Column(Integer, ForeignKey("orders.id"))
-    menu_item_id = Column(Integer, ForeignKey("menu_items.id"))
-    quantity = Column(Integer, nullable=False)
-    price = Column(Float, nullable=False)
-    
-    # Relationships
-    order = relationship("Order", back_populates="items")
-    menu_item = relationship("MenuItem")
 
 class Notification(Base):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)
-    title = Column(String(255), nullable=False)
-    message = Column(String(500), nullable=False)
-    type = Column(String(50), nullable=False)  # order, user, system
+    user_id = Column(Integer, ForeignKey("users.id"))
+    title = Column(String)
+    message = Column(String)
+    type = Column(String)  # e.g., "order", "promo", "system"
     read = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("User", back_populates="notifications")
+
+class Order(Base):
+    __tablename__ = "orders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    reference = Column(String(255), unique=True, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    amount = Column(Float, nullable=False)
+    delivery_fee = Column(Float, nullable=False)
+    final_amount = Column(Float, nullable=False)
+    status = Column(String(50), default="pending")
+    payment_status = Column(String(50), default="pending")
+    payment_reference = Column(String(255))
+    items = Column(Text)  # JSON string
+    email = Column(String(255))
+    name = Column(String(255))
+    phone = Column(String(50))
+    address = Column(Text)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    
+    # Relationship
+    user = relationship("User", back_populates="orders")
+
+    @property
+    def order_items(self):
+        """Convert stored JSON string to Python list"""
+        if not self.items:
+            return []
+        try:
+            return json.loads(self.items)
+        except:
+            return []
+
+    @order_items.setter
+    def order_items(self, items):
+        """Convert Python list to JSON string for storage"""
+        self.items = json.dumps(items if items is not None else [])

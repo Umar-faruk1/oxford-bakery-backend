@@ -64,16 +64,17 @@ async def get_users(
 @router.get("/users/{user_id}", response_model=UserResponse)
 async def get_user(
     user_id: int,
-    current_user: User = Depends(get_admin_user),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
 ):
+    """Get a specific user by ID (Admin only)"""
+    if current_user.role != "admin":
+        raise HTTPException(status_code=403, detail="Not authorized")
+
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="User not found"
-        )
-    
+        raise HTTPException(status_code=404, detail="User not found")
+
     return UserResponse.from_db_model(user)
 
 @router.put("/users/{user_id}", response_model=UserResponse)

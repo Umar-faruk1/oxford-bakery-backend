@@ -1,8 +1,9 @@
-from pydantic import BaseModel, EmailStr
-from typing import Optional, List, Literal
+from pydantic import BaseModel, EmailStr, Field, field_validator
+from typing import Optional, List, Literal, Dict, Any
 from datetime import datetime
 import os
 from dotenv import load_dotenv
+import json
 
 # Load environment variables
 load_dotenv()
@@ -48,7 +49,6 @@ class UserResponse(BaseModel):
     email: str
     role: str
     status: str
-    orders: int
     image: Optional[str] = None
     joinDate: str
 
@@ -63,7 +63,6 @@ class UserResponse(BaseModel):
             email=user.email,
             role=user.role,
             status=user.status,
-            orders=user.orders,
             image=f"{BACKEND_URL}{user.image}" if user.image else None,
             joinDate=user.created_at.strftime("%Y-%m-%d") if user.created_at else datetime.now().strftime("%Y-%m-%d")
         )
@@ -191,46 +190,6 @@ class PromoCodeResponse(BaseModel):
             updated_at=promo.updated_at
         )
 
-class OrderItemCreate(BaseModel):
-    menu_item_id: int
-    quantity: int
-    price: float
-
-class OrderCreate(BaseModel):
-    reference: str
-    amount: float
-    email: str
-    name: str
-    phone: str
-    address: str
-    promo_code: Optional[str] = None
-    items: List[OrderItemCreate]
-
-class PaymentVerification(BaseModel):
-    reference: str
-    status: str
-    transaction_id: str
-
-class OrderResponse(BaseModel):
-    id: int
-    reference: str
-    amount: float
-    delivery_fee: float
-    discount: float
-    final_amount: float
-    promo_code: Optional[str]
-    email: str
-    name: str
-    phone: str
-    address: str
-    status: str
-    payment_status: str
-    created_at: datetime
-    items: List[OrderItemCreate]
-
-    class Config:
-        from_attributes = True
-
 class NotificationResponse(BaseModel):
     id: int
     title: str
@@ -242,6 +201,70 @@ class NotificationResponse(BaseModel):
     class Config:
         from_attributes = True
 
-class OrderStatusUpdate(BaseModel):
-    status: Literal['pending', 'processing', 'delivered', 'cancelled']
+class OrderItem(BaseModel):
+    menu_item_id: int
+    name: str
+    quantity: int
+    price: float
+    image: Optional[str] = None
 
+class OrderBase(BaseModel):
+    reference: Optional[str] = None
+    amount: float
+    delivery_fee: float
+    final_amount: float
+    status: str = "pending"
+    payment_status: str = "pending"
+    email: str
+    name: str
+    phone: Optional[str] = None
+    address: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+class OrderCreate(BaseModel):
+    amount: float
+    delivery_fee: float
+    final_amount: float
+    payment_reference: str
+    email: str
+    name: str
+    phone: Optional[str] = None
+    address: Optional[str] = None
+    items: List[OrderItem]
+
+    class Config:
+        from_attributes = True
+
+class OrderResponse(OrderBase):
+    id: int
+    user_id: int
+    payment_reference: Optional[str] = None
+    created_at: datetime
+    items: List[OrderItem]
+
+    @field_validator('items', mode='before')
+    @classmethod
+    def parse_items(cls, value):
+        if isinstance(value, str):
+            return json.loads(value)
+        return value
+
+    class Config:
+        from_attributes = True
+
+class OrderFilter(BaseModel):
+    status: Optional[str] = None
+    payment_status: Optional[str] = None
+    start_date: Optional[datetime] = None
+    end_date: Optional[datetime] = None
+    page: int = 1
+    per_page: int = 10
+
+class PaginatedOrderResponse(BaseModel):
+    items: List[OrderResponse]
+    total: int
+    page: int
+    per_page: int
+    pages: int

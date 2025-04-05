@@ -1,12 +1,23 @@
-from fastapi import FastAPI, WebSocket
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from database import engine
 from models import Base
-from routers import auth_routes, user_routes, admin_routes, menu_routes, promo_routes, payment_routes, notification_routes
-from websocket_manager import manager
 
-app = FastAPI()
+# Import routers
+from routers.auth_routes import router as auth_router
+from routers.user_routes import router as user_router
+from routers.admin_routes import router as admin_router
+from routers.menu_routes import router as menu_router
+from routers.promo_routes import router as promo_router
+from routers.notification_routes import router as notification_router
+from routers.order_routes import router as order_router
+
+app = FastAPI(
+    title="Oxford Bakery API",
+    description="API for Oxford Bakery",
+    version="1.0.0"
+)
 
 # Configure CORS
 app.add_middleware(
@@ -17,34 +28,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Mount the uploads directory to serve static files
+# Mount static files
 app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
 
 # Include routers
-app.include_router(auth_routes.router, prefix="/api")
-app.include_router(user_routes.router, prefix="/api")
-app.include_router(admin_routes.router, prefix="/api")
-app.include_router(menu_routes.router, prefix="/api")
-app.include_router(promo_routes.router, prefix="/api")
-app.include_router(payment_routes.router, prefix="/api")
-app.include_router(notification_routes.router, prefix="/api")
+app.include_router(auth_router, prefix="/api")
+app.include_router(user_router, prefix="/api")
+app.include_router(admin_router, prefix="/api")
+app.include_router(menu_router, prefix="/api")
+app.include_router(promo_router, prefix="/api")
+app.include_router(notification_router, prefix="/api")
+app.include_router(order_router, prefix="/api")
 
-# Optional: Add a test route
-@app.get("/")
-def read_root():
+@app.get("/api")
+async def root():
     return {"message": "Welcome to Oxford Bakery API"}
-
-@app.websocket("/ws/orders")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
-    try:
-        while True:
-            data = await websocket.receive_text()
-            # Handle received data if needed
-    except Exception:
-        manager.disconnect(websocket)
-
-
