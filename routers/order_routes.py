@@ -1,9 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, Query, Body
+from fastapi import APIRouter, Depends, HTTPException, Query, Body, Request
 from sqlalchemy.orm import Session
 from typing import List, Optional, Literal
 from datetime import datetime
 from database import get_db
-from models import Order, User
+from models import Order, User, Notification, PromoCode
 from schemas import OrderResponse, OrderCreate, PaginatedOrderResponse
 from routers.auth_routes import get_current_user
 import json
@@ -12,6 +12,9 @@ import os
 from dotenv import load_dotenv
 import uuid
 from pydantic import ValidationError
+import hmac
+import hashlib
+from sqlalchemy.sql import text
 
 load_dotenv()
 PAYSTACK_SECRET_KEY = os.getenv('PAYSTACK_SECRET_KEY')
@@ -150,11 +153,37 @@ async def create_order(
     db: Session = Depends(get_db)
 ):
     try:
+        # Validate promo code if provided
+        if order.promo_code:
+            promo = db.query(PromoCode).filter(
+                PromoCode.code == order.promo_code,
+                PromoCode.is_active == True
+            ).first()
+            
+            if not promo:
+                raise HTTPException(status_code=400, detail="Invalid promo code")
+            
+            # Increment usage count
+            promo.usage_count += 1
+            db.commit()
+
         # Print incoming data for debugging
         print("Incoming order data:", order.model_dump())
         
         # Generate unique reference
         reference = f"ord_{uuid.uuid4().hex[:12]}"
+        
+        # Format items to ensure they have all required fields
+        formatted_items = []
+        for item in order.items:
+            formatted_item = {
+                "menu_item_id": item.menu_item_id,
+                "name": item.name,
+                "quantity": item.quantity,
+                "price": item.price,
+                "image": item.image if hasattr(item, 'image') else None
+            }
+            formatted_items.append(formatted_item)
         
         # Create new order
         db_order = Order(
@@ -168,7 +197,7 @@ async def create_order(
             name=order.name,
             phone=order.phone,
             address=order.address,
-            items=json.dumps([item.model_dump() for item in order.items]),
+            items=json.dumps(formatted_items),
             status="pending",
             payment_status="pending",
             created_at=datetime.utcnow()
@@ -178,7 +207,26 @@ async def create_order(
             db.add(db_order)
             db.commit()
             db.refresh(db_order)
-            return db_order
+            
+            # Convert the order back to response format
+            items = json.loads(db_order.items) if db_order.items else []
+            return OrderResponse(
+                id=db_order.id,
+                reference=db_order.reference,
+                user_id=db_order.user_id,
+                amount=db_order.amount,
+                delivery_fee=db_order.delivery_fee,
+                final_amount=db_order.final_amount,
+                status=db_order.status,
+                payment_status=db_order.payment_status,
+                payment_reference=db_order.payment_reference,
+                items=items,
+                created_at=db_order.created_at,
+                email=db_order.email,
+                name=db_order.name,
+                phone=db_order.phone,
+                address=db_order.address
+            )
         except Exception as db_error:
             db.rollback()
             print(f"Database error: {str(db_error)}")
@@ -189,7 +237,55 @@ async def create_order(
         raise HTTPException(status_code=422, detail=ve.errors())
     except Exception as e:
         print(f"General error: {str(e)}")
-        raise HTTPException(status_code=422, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/webhook")
+async def paystack_webhook(request: Request, db: Session = Depends(get_db)):
+    # Get the Paystack signature from headers
+    signature = request.headers.get("x-paystack-signature")
+    if not signature:
+        raise HTTPException(status_code=400, detail="No signature provided")
+    
+    # Get the raw body
+    body = await request.body()
+    
+    # Verify the signature
+    computed_hmac = hmac.new(
+        PAYSTACK_SECRET_KEY.encode('utf-8'),
+        body,
+        hashlib.sha512
+    ).hexdigest()
+    
+    if not hmac.compare_digest(computed_hmac, signature):
+        raise HTTPException(status_code=400, detail="Invalid signature")
+    
+    # Parse the webhook payload
+    payload = json.loads(body)
+    event = payload.get("event")
+    
+    if event == "charge.success":
+        reference = payload["data"]["reference"]
+        
+        # Find and update the order
+        order = db.query(Order).filter(Order.payment_reference == reference).first()
+        if order:
+            order.payment_status = "paid"
+            order.status = "processing"
+            db.commit()
+            
+            # Create a notification for the user
+            notification = Notification(
+                user_id=order.user_id,
+                title="Payment Successful",
+                message=f"Your order #{order.reference} has been paid and is being processed.",
+                type="order"
+            )
+            db.add(notification)
+            db.commit()
+            
+            return {"status": "success"}
+    
+    return {"status": "ignored"}
 
 @router.post("/verify-payment/{reference}")
 async def verify_payment(
@@ -218,6 +314,15 @@ async def verify_payment(
                 if order:
                     order.payment_status = "paid"
                     order.status = "processing"
+                    
+                    # Create a notification for the user
+                    notification = Notification(
+                        user_id=order.user_id,
+                        title="Payment Successful",
+                        message=f"Your order #{order.reference} has been paid and is being processed.",
+                        type="order"
+                    )
+                    db.add(notification)
                     db.commit()
                     
                     return {"status": "success", "message": "Payment verified"}
@@ -230,7 +335,7 @@ async def verify_payment(
 @router.patch("/admin/orders/{order_id}/status")
 async def update_order_status(
     order_id: int,
-    status: OrderStatus = Body(...),
+    status_update: dict = Body(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
@@ -243,12 +348,49 @@ async def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     
-    # Update status
-    order.status = status
-    db.commit()
-    db.refresh(order)
+    # Validate status
+    status = status_update.get("status")
+    if not status or status not in ["pending", "processing", "completed", "cancelled", "delivered"]:
+        raise HTTPException(status_code=422, detail="Invalid status value")
     
-    return {
-        "message": "Order status updated successfully",
-        "status": status
-    } 
+    try:
+        # Update status
+        order.status = status
+        db.commit()
+        db.refresh(order)
+        
+        # Create notification for the user
+        notification = Notification(
+            user_id=order.user_id,
+            title="Order Status Updated",
+            message=f"Your order #{order.reference} status has been updated to {status}.",
+            type="order"
+        )
+        db.add(notification)
+        db.commit()
+        
+        return {
+            "message": "Order status updated successfully",
+            "status": status,
+            "order": OrderResponse(
+                id=order.id,
+                reference=order.reference,
+                user_id=order.user_id,
+                amount=order.amount,
+                delivery_fee=order.delivery_fee,
+                final_amount=order.final_amount,
+                status=order.status,
+                payment_status=order.payment_status,
+                payment_reference=order.payment_reference,
+                items=json.loads(order.items) if order.items else [],
+                created_at=order.created_at,
+                email=order.email,
+                name=order.name,
+                phone=order.phone,
+                address=order.address
+            )
+        }
+    except Exception as e:
+        db.rollback()
+        print(f"Error updating order status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e)) 

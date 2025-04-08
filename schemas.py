@@ -233,6 +233,7 @@ class OrderCreate(BaseModel):
     phone: Optional[str] = None
     address: Optional[str] = None
     items: List[OrderItem]
+    promo_code: Optional[str] = None
 
     class Config:
         from_attributes = True
